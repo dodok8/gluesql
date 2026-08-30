@@ -93,7 +93,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
             }
         }
 
-        let records_error = result_ok_type(&method.sig.output).is_some();
+        let records_error = args.capture_full && result_ok_type(&method.sig.output).is_some();
         let attribute = match (fields.is_empty(), records_error) {
             (true, true) => quote!(
                 #[tracing::instrument(
@@ -204,4 +204,32 @@ fn result_ok_type(output: &ReturnType) -> Option<Type> {
         GenericArgument::Type(ok_type) => Some(ok_type.clone()),
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::expand, quote::quote};
+
+    #[test]
+    fn capture_off_omits_error_recording() {
+        let implementation = quote! {
+            impl Storage {
+                fn operation(&self) -> Result<(), Error> {
+                    Ok(())
+                }
+            }
+        };
+        let capture_full = expand(
+            quote!(name = "test", capture = "full"),
+            implementation.clone(),
+        )
+        .expect("full instrumentation should expand")
+        .to_string();
+        let capture_off = expand(quote!(name = "test", capture = "off"), implementation)
+            .expect("timing-only instrumentation should expand")
+            .to_string();
+
+        assert!(capture_full.contains("err (Debug)"));
+        assert!(!capture_off.contains("err (Debug)"));
+    }
 }
