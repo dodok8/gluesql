@@ -31,6 +31,19 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
     ///
     /// Returns an error when parsing the SQL text fails or when building an execution plan for
     /// a statement fails.
+    #[cfg_attr(
+        feature = "tracing",
+        tracing::instrument(
+            name = "gluesql.plan_sql",
+            target = "gluesql",
+            level = "debug",
+            skip_all,
+            fields(
+                sql = %sql.as_ref(),
+                params = tracing::field::Empty
+            )
+        )
+    )]
     pub fn plan_with_params<Sql, I, P>(&mut self, sql: Sql, params: I) -> Result<Vec<StatementPlan>>
     where
         Sql: AsRef<str>,
@@ -42,6 +55,10 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
             .into_iter()
             .map(IntoParamLiteral::into_param_literal)
             .collect();
+        #[cfg(feature = "tracing")]
+        if tracing::enabled!(target: "gluesql", tracing::Level::DEBUG) {
+            tracing::Span::current().record("params", tracing::field::debug(&params));
+        }
         parsed
             .into_iter()
             .map(|p| {
@@ -86,7 +103,11 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
             name = "gluesql.execute",
             target = "gluesql",
             level = "info",
-            skip_all
+            skip_all,
+            fields(
+                sql = %sql.as_ref(),
+                params = tracing::field::Empty
+            )
         )
     )]
     pub fn execute_with_params<Sql, I, P>(&mut self, sql: Sql, params: I) -> Result<Vec<Payload>>
@@ -95,6 +116,12 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
         I: IntoIterator<Item = P>,
         P: IntoParamLiteral,
     {
+        let params: Vec<ParamLiteral> = params
+            .into_iter()
+            .map(IntoParamLiteral::into_param_literal)
+            .collect();
+        #[cfg(feature = "tracing")]
+        tracing::Span::current().record("params", tracing::field::debug(&params));
         let statements = self.plan_with_params(sql, params)?;
         let mut payloads = Vec::<Payload>::new();
         for statement in &statements {
