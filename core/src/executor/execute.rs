@@ -20,7 +20,7 @@ use {
             TableAliasPlan,
         },
         result::{Error, Result},
-        store::{GStore, GStoreMut, Transaction, trace},
+        store::{GStore, GStoreMut, trace},
     },
     serde::{Deserialize, Serialize},
     std::{
@@ -104,18 +104,6 @@ pub enum PayloadVariable {
     Version(String),
 }
 
-fn begin_transaction<T: Transaction>(storage: &mut T, autocommit: bool) -> Result<bool> {
-    trace::begin(storage, autocommit)
-}
-
-fn commit_transaction<T: Transaction>(storage: &mut T) -> Result<()> {
-    trace::commit(storage)
-}
-
-fn rollback_transaction<T: Transaction>(storage: &mut T) -> Result<()> {
-    trace::rollback(storage)
-}
-
 pub fn execute<T: GStore + GStoreMut>(
     storage: &mut T,
     statement: &StatementPlan,
@@ -127,7 +115,7 @@ pub fn execute<T: GStore + GStoreMut>(
         return execute_inner(storage, statement);
     }
 
-    let autocommit = begin_transaction(storage, true)?;
+    let autocommit = trace::begin(storage, true)?;
     let result = execute_inner(storage, statement);
 
     if !autocommit {
@@ -135,9 +123,9 @@ pub fn execute<T: GStore + GStoreMut>(
     }
 
     match result {
-        Ok(payload) => commit_transaction(storage).map(|()| payload),
+        Ok(payload) => trace::commit(storage).map(|()| payload),
         Err(error) => {
-            rollback_transaction(storage)?;
+            trace::rollback(storage)?;
 
             Err(error)
         }
@@ -191,10 +179,10 @@ fn execute_inner<T: GStore + GStoreMut>(
         }
         //- Transaction
         StatementPlan::StartTransaction => {
-            begin_transaction(storage, false).map(|_| Payload::StartTransaction)
+            trace::begin(storage, false).map(|_| Payload::StartTransaction)
         }
-        StatementPlan::Commit => commit_transaction(storage).map(|()| Payload::Commit),
-        StatementPlan::Rollback => rollback_transaction(storage).map(|()| Payload::Rollback),
+        StatementPlan::Commit => trace::commit(storage).map(|()| Payload::Commit),
+        StatementPlan::Rollback => trace::rollback(storage).map(|()| Payload::Rollback),
         //-- Rows
         StatementPlan::Insert {
             table_name,

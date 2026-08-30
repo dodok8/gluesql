@@ -1,11 +1,10 @@
 use {
     super::{context::RowContext, filter::check_expr},
     crate::{
-        ast::IndexOperator,
-        data::{Key, Row, SCHEMALESS_DOC_COLUMN, Value},
+        data::{Key, Row, SCHEMALESS_DOC_COLUMN},
         plan::ExprPlan,
         result::Result,
-        store::{GStore, RowIter, trace},
+        store::{GStore, trace},
     },
     serde::Serialize,
     std::{borrow::Cow, fmt::Debug, rc::Rc},
@@ -20,37 +19,11 @@ pub enum FetchError {
     TableNotFound(String),
 }
 
-#[cfg(feature = "tracing")]
-fn trace_access_path(access_path: &'static str) {
+pub(crate) fn trace_access_path(access_path: &'static str) {
+    #[cfg(feature = "tracing")]
     tracing::debug!(target: "gluesql", access_path, "selected query access path");
-}
-
-pub(crate) fn trace_scan<'a, T: GStore>(storage: &'a T, table_name: &str) -> Result<RowIter<'a>> {
-    #[cfg(feature = "tracing")]
-    trace_access_path("full_scan");
-    trace::scan_data(storage, table_name)
-}
-
-pub(crate) fn trace_index_scan<'a, T: GStore>(
-    storage: &'a T,
-    table_name: &str,
-    index_name: &str,
-    asc: Option<bool>,
-    cmp_value: Option<(&IndexOperator, Value)>,
-) -> Result<RowIter<'a>> {
-    #[cfg(feature = "tracing")]
-    trace_access_path("secondary_index");
-    trace::scan_indexed_data(storage, table_name, index_name, asc, cmp_value)
-}
-
-pub(crate) fn trace_fetch<T: GStore>(
-    storage: &T,
-    table_name: &str,
-    key: &Key,
-) -> Result<Option<Vec<Value>>> {
-    #[cfg(feature = "tracing")]
-    trace_access_path("primary_key");
-    trace::fetch_data(storage, table_name, key)
+    #[cfg(not(feature = "tracing"))]
+    let _ = access_path;
 }
 
 pub fn fetch<'a, T: GStore>(
@@ -59,7 +32,8 @@ pub fn fetch<'a, T: GStore>(
     columns: Rc<[String]>,
     where_clause: Option<&'a ExprPlan>,
 ) -> Result<KeyedRows<'a>> {
-    let rows = trace_scan(storage, table_name)?.filter_map(move |row| {
+    trace_access_path("full_scan");
+    let rows = trace::scan_data(storage, table_name)?.filter_map(move |row| {
         let (key, values) = match row {
             Ok(row) => row,
             Err(error) => return Some(Err(error)),

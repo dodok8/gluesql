@@ -8,7 +8,7 @@ use {
         executor::{
             context::RowContext,
             evaluate::evaluate,
-            fetch::{fetch_columns, trace_fetch, trace_index_scan, trace_scan},
+            fetch::{fetch_columns, trace_access_path},
         },
         plan::{TableAccessPlan, TableSourcePlan},
         result::Result,
@@ -75,7 +75,8 @@ fn rows<'a, T: GStore>(
     let columns = Rc::clone(&source.names);
     let rows = match &table.access {
         TableAccessPlan::FullScan => {
-            let rows = trace_scan(storage, &table.name)?.map({
+            trace_access_path("full_scan");
+            let rows = trace::scan_data(storage, &table.name)?.map({
                 let columns = Rc::clone(&columns);
 
                 move |row| {
@@ -106,7 +107,8 @@ fn rows<'a, T: GStore>(
             let value = evaluated.try_into_value(&column_def.data_type, column_def.nullable)?;
             let key = Key::try_from(value)?;
 
-            match trace_fetch(storage, &table.name, &key)? {
+            trace_access_path("primary_key");
+            match trace::fetch_data(storage, &table.name, &key)? {
                 Some(values) => Box::new(iter::once(Ok(Row {
                     columns: Rc::clone(&columns),
                     values,
@@ -127,17 +129,19 @@ fn rows<'a, T: GStore>(
                 }
                 None => None,
             };
-            let rows = trace_index_scan(storage, &table.name, name, *asc, predicate)?.map({
-                let columns = Rc::clone(&columns);
+            trace_access_path("secondary_index");
+            let rows =
+                trace::scan_indexed_data(storage, &table.name, name, *asc, predicate)?.map({
+                    let columns = Rc::clone(&columns);
 
-                move |row| {
-                    let (_, values) = row?;
-                    Ok(Row {
-                        columns: Rc::clone(&columns),
-                        values,
-                    })
-                }
-            });
+                    move |row| {
+                        let (_, values) = row?;
+                        Ok(Row {
+                            columns: Rc::clone(&columns),
+                            values,
+                        })
+                    }
+                });
 
             Box::new(rows)
         }
