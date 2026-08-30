@@ -28,12 +28,6 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
         trace::plan(&self.storage, statement)
     }
 
-    /// Plans all statements in the SQL string using the supplied parameters.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when parsing the SQL text fails or when building an execution plan for
-    /// a statement fails.
     #[cfg_attr(
         feature = "tracing",
         tracing::instrument(
@@ -42,33 +36,43 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
             level = "debug",
             skip_all,
             fields(
-                sql = %sql.as_ref(),
-                params = tracing::field::Empty
+                sql = %sql,
+                params = ?params
             )
         )
     )]
+    fn plan_param_literals(
+        &self,
+        sql: &str,
+        params: &[ParamLiteral],
+    ) -> Result<Vec<StatementPlan>> {
+        parse(sql)?
+            .into_iter()
+            .map(|p| {
+                translate_with_params(&p, params)
+                    .and_then(|statement| self.plan_statement(statement.into()))
+            })
+            .collect()
+    }
+
+    /// Plans all statements in the SQL string using the supplied parameters.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when parsing the SQL text fails or when building an execution plan for
+    /// a statement fails.
     pub fn plan_with_params<Sql, I, P>(&mut self, sql: Sql, params: I) -> Result<Vec<StatementPlan>>
     where
         Sql: AsRef<str>,
         I: IntoIterator<Item = P>,
         P: IntoParamLiteral,
     {
-        let parsed = parse(sql)?;
         let params: Vec<ParamLiteral> = params
             .into_iter()
             .map(IntoParamLiteral::into_param_literal)
             .collect();
-        #[cfg(feature = "tracing")]
-        if tracing::enabled!(target: "gluesql", tracing::Level::DEBUG) {
-            tracing::Span::current().record("params", tracing::field::debug(&params));
-        }
-        parsed
-            .into_iter()
-            .map(|p| {
-                translate_with_params(&p, &params)
-                    .and_then(|statement| self.plan_statement(statement.into()))
-            })
-            .collect()
+
+        self.plan_param_literals(sql.as_ref(), &params)
     }
 
     /// Plans all statements in the SQL string without parameters.
@@ -125,7 +129,7 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
             .collect();
         #[cfg(feature = "tracing")]
         tracing::Span::current().record("params", tracing::field::debug(&params));
-        let statements = self.plan_with_params(sql, params)?;
+        let statements = self.plan_param_literals(sql.as_ref(), &params)?;
         let mut payloads = Vec::<Payload>::new();
         for statement in &statements {
             let payload = self.execute_stmt(statement)?;
