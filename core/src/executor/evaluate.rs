@@ -14,7 +14,7 @@ use {
         mock::MockStorage,
         plan::{ExprPlan, FunctionExprPlan, ProjectionPlan, plan_scalar_expr},
         result::{Error, Result},
-        store::GStore,
+        store::{GStore, trace},
     },
     chrono::prelude::Utc,
     std::{borrow::Cow, ops::ControlFlow, rc::Rc},
@@ -343,13 +343,13 @@ fn evaluate_function<'a, 'b: 'a, T: GStore>(
             f::concat(exprs)
         }
         FunctionExprPlan::Custom { name, exprs } => {
+            let custom_function_storage =
+                storage.ok_or(EvaluateError::UnsupportedCustomFunction)?;
             let CustomFunction {
                 func_name,
                 args,
                 body,
-            } = storage
-                .ok_or(EvaluateError::UnsupportedCustomFunction)?
-                .fetch_function(name)?
+            } = trace::fetch_function(custom_function_storage, name)?
                 .ok_or_else(|| EvaluateError::UnsupportedFunction(name.clone()))?;
 
             let min = args.iter().filter(|arg| arg.default.is_none()).count();

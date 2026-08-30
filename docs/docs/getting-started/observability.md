@@ -170,6 +170,23 @@ New storage implementations therefore receive identifiable trait-boundary spans 
 `gluesql-core/tracing` without adding storage-specific instrumentation. Storage-specific spans are
 only needed for internal operations that are not visible at the trait boundary.
 
+GlueSQL routes its storage trait calls through explicit Core tracing functions. The generic spans
+cover every storage trait method used by the planner and executor:
+
+| Trait | Spans |
+| --- | --- |
+| `Planner` | `plan` |
+| `Store` | `fetch_schema`, `fetch_all_schemas`, `fetch_data`, `scan_data`, `fetch_referencings` |
+| `StoreMut` | `insert_schema`, `delete_schema`, `append_data`, `insert_data`, `delete_data` |
+| `Index` / `IndexMut` | `scan_indexed_data`, `create_index`, `drop_index` |
+| `AlterTable` | `rename_schema`, `rename_column`, `add_column`, `drop_column` |
+| `Metadata` | `scan_table_meta` |
+| `CustomFunction` / `CustomFunctionMut` | `fetch_function`, `fetch_all_functions`, `insert_function`, `delete_function` |
+| `Transaction` | `begin`, `commit`, `rollback` |
+
+Each name is prefixed with `gluesql.storage.`. Data mutation spans also record `row_count`, and
+`gluesql.storage.begin` records `autocommit`.
+
 Access-path events use one of these stable values:
 
 ```text

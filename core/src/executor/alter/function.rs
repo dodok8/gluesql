@@ -4,7 +4,7 @@ use {
         ast::{Expr, OperateFunctionArg},
         data::CustomFunction,
         result::Result,
-        store::{GStore, GStoreMut},
+        store::{GStore, GStoreMut, trace},
     },
 };
 
@@ -18,13 +18,16 @@ pub fn insert_function<T: GStore + GStoreMut>(
     validate_arg_names(args)?;
     validate_default_args(args)?;
 
-    if storage.fetch_function(func_name)?.is_none() || or_replace {
-        storage.delete_function(func_name)?;
-        storage.insert_function(CustomFunction {
-            func_name: func_name.to_owned(),
-            args: args.to_owned(),
-            body: body.to_owned(),
-        })?;
+    if trace::fetch_function(storage, func_name)?.is_none() || or_replace {
+        trace::delete_function(storage, func_name)?;
+        trace::insert_function(
+            storage,
+            CustomFunction {
+                func_name: func_name.to_owned(),
+                args: args.to_owned(),
+                body: body.to_owned(),
+            },
+        )?;
         Ok(())
     } else {
         Err(AlterError::FunctionAlreadyExists(func_name.to_owned()).into())
@@ -37,13 +40,13 @@ pub fn delete_function<T: GStore + GStoreMut>(
     if_exists: bool,
 ) -> Result<()> {
     for func_name in func_names {
-        let function = storage.fetch_function(func_name)?;
+        let function = trace::fetch_function(storage, func_name)?;
 
         if !if_exists {
             function.ok_or_else(|| AlterError::FunctionNotFound(func_name.to_owned()))?;
         }
 
-        storage.delete_function(func_name)?;
+        trace::delete_function(storage, func_name)?;
     }
     Ok(())
 }

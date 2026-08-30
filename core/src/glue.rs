@@ -3,7 +3,7 @@ use crate::{
     parse_sql::parse,
     plan::StatementPlan,
     result::Result,
-    store::{GStore, GStoreMut, Planner},
+    store::{GStore, GStoreMut, Planner, trace},
     translate::{IntoParamLiteral, ParamLiteral, translate_with_params},
 };
 
@@ -22,7 +22,7 @@ impl<T: GStore + GStoreMut + Planner> Glue<T> {
         tracing::instrument(name = "gluesql.plan", target = "gluesql", level = "debug", skip_all)
     )]
     fn plan_statement(&self, statement: StatementPlan) -> Result<StatementPlan> {
-        self.storage.plan(statement)
+        trace::plan(&self.storage, statement)
     }
 
     /// Plans all statements in the SQL string using the supplied parameters.

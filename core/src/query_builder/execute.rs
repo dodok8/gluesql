@@ -6,7 +6,7 @@ use {
         plan::StatementPlan,
         prelude::Glue,
         result::Result,
-        store::{GStore, GStoreMut, Planner},
+        store::{GStore, GStoreMut, Planner, trace},
     },
 };
 
@@ -16,7 +16,7 @@ where
 {
     fn execute(self, glue: &mut Glue<T>) -> Result<Payload> {
         let statement = self.build()?;
-        let statement = glue.storage.plan(statement)?;
+        let statement = trace::plan(&glue.storage, statement)?;
 
         glue.execute_stmt(&statement)
     }

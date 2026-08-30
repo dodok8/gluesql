@@ -1,5 +1,5 @@
 use {
-    super::{Store, StoreMut},
+    super::{Store, StoreMut, trace},
     crate::{
         ast::ColumnDef, data::Value, executor::evaluate_stateless, plan::plan_scalar_expr,
         result::Result,
@@ -32,16 +32,15 @@ pub enum AlterTableError {
 
 pub trait AlterTable: Store + StoreMut {
     fn rename_schema(&mut self, table_name: &str, new_table_name: &str) -> Result<()> {
-        let mut schema = self
-            .fetch_schema(table_name)?
+        let mut schema = trace::fetch_schema(self, table_name)?
             .ok_or_else(|| AlterTableError::TableNotFound(table_name.to_owned()))?;
         new_table_name.clone_into(&mut schema.table_name);
-        self.insert_schema(&schema)?;
+        trace::insert_schema(self, &schema)?;
 
-        let rows = self.scan_data(table_name)?.collect::<Result<Vec<_>>>()?;
+        let rows = trace::scan_data(self, table_name)?.collect::<Result<Vec<_>>>()?;
 
-        self.insert_data(new_table_name, rows)?;
-        self.delete_schema(table_name)
+        trace::insert_data(self, new_table_name, rows)?;
+        trace::delete_schema(self, table_name)
     }
 
     fn rename_column(
@@ -50,8 +49,7 @@ pub trait AlterTable: Store + StoreMut {
         old_column_name: &str,
         new_column_name: &str,
     ) -> Result<()> {
-        let mut schema = self
-            .fetch_schema(table_name)?
+        let mut schema = trace::fetch_schema(self, table_name)?
             .ok_or_else(|| AlterTableError::TableNotFound(table_name.to_owned()))?;
 
         let column_defs = schema
@@ -74,15 +72,14 @@ pub trait AlterTable: Store + StoreMut {
                 .name,
         );
 
-        let rows = self.scan_data(table_name)?.collect::<Result<Vec<_>>>()?;
+        let rows = trace::scan_data(self, table_name)?.collect::<Result<Vec<_>>>()?;
 
-        self.insert_schema(&schema)?;
-        self.insert_data(table_name, rows)
+        trace::insert_schema(self, &schema)?;
+        trace::insert_data(self, table_name, rows)
     }
 
     fn add_column(&mut self, table_name: &str, column_def: &ColumnDef) -> Result<()> {
-        let mut schema = self
-            .fetch_schema(table_name)?
+        let mut schema = trace::fetch_schema(self, table_name)?
             .ok_or_else(|| AlterTableError::TableNotFound(table_name.to_owned()))?;
 
         let default_value = match (column_def.default.as_ref(), column_def.nullable) {
@@ -108,8 +105,7 @@ pub trait AlterTable: Store + StoreMut {
 
         column_defs.push(column_def.clone());
 
-        let rows = self
-            .scan_data(table_name)?
+        let rows = trace::scan_data(self, table_name)?
             .map(|row| {
                 let (key, mut values) = row?;
                 let default_value = default_value.clone();
@@ -119,13 +115,12 @@ pub trait AlterTable: Store + StoreMut {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        self.insert_schema(&schema)?;
-        self.insert_data(table_name, rows)
+        trace::insert_schema(self, &schema)?;
+        trace::insert_data(self, table_name, rows)
     }
 
     fn drop_column(&mut self, table_name: &str, column_name: &str, if_exists: bool) -> Result<()> {
-        let mut schema = self
-            .fetch_schema(table_name)?
+        let mut schema = trace::fetch_schema(self, table_name)?
             .ok_or_else(|| AlterTableError::TableNotFound(table_name.to_owned()))?;
 
         let column_defs = schema
@@ -146,8 +141,7 @@ pub trait AlterTable: Store + StoreMut {
 
         column_defs.retain(|column_def| column_def.name != column_name);
 
-        let rows = self
-            .scan_data(table_name)?
+        let rows = trace::scan_data(self, table_name)?
             .map(|row| {
                 let (key, mut values) = row?;
                 values.remove(i);
@@ -155,7 +149,7 @@ pub trait AlterTable: Store + StoreMut {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        self.insert_schema(&schema)?;
-        self.insert_data(table_name, rows)
+        trace::insert_schema(self, &schema)?;
+        trace::insert_data(self, table_name, rows)
     }
 }

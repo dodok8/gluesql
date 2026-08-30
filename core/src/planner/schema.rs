@@ -12,7 +12,7 @@ use {
             StatementPlan, ValuesOrderByPlan,
         },
         result::Result,
-        store::Store,
+        store::{Store, trace},
     },
     std::{collections::HashMap, iter},
 };
@@ -26,8 +26,7 @@ pub fn fetch_schema_map<T: Store + ?Sized>(
         StatementPlan::Insert {
             table_name, source, ..
         } => {
-            let table_schema = storage
-                .fetch_schema(table_name)?
+            let table_schema = trace::fetch_schema(storage, table_name)?
                 .map_or_else(HashMap::new, |schema| {
                     HashMap::from([(table_name.to_owned(), schema)])
                 });
@@ -37,8 +36,7 @@ pub fn fetch_schema_map<T: Store + ?Sized>(
             Ok(schema_list)
         }
         StatementPlan::CreateTable { name, source, .. } => {
-            let table_schema = storage
-                .fetch_schema(name)?
+            let table_schema = trace::fetch_schema(storage, name)?
                 .map_or_else(HashMap::new, |schema| {
                     HashMap::from([(name.to_owned(), schema)])
                 });
@@ -53,7 +51,7 @@ pub fn fetch_schema_map<T: Store + ?Sized>(
         StatementPlan::DropTable { names, .. } => {
             let mut schema_map = HashMap::new();
             for table_name in names {
-                if let Some(schema) = storage.fetch_schema(table_name)? {
+                if let Some(schema) = trace::fetch_schema(storage, table_name)? {
                     schema_map.insert(table_name.clone(), schema);
                 }
             }
@@ -65,8 +63,7 @@ pub fn fetch_schema_map<T: Store + ?Sized>(
             selection,
             ..
         } => {
-            let table_schema = storage
-                .fetch_schema(table_name)?
+            let table_schema = trace::fetch_schema(storage, table_name)?
                 .map_or_else(HashMap::new, |schema| {
                     HashMap::from([(table_name.to_owned(), schema)])
                 });
@@ -80,8 +77,7 @@ pub fn fetch_schema_map<T: Store + ?Sized>(
             table_name,
             selection,
         } => {
-            let table_schema = storage
-                .fetch_schema(table_name)?
+            let table_schema = trace::fetch_schema(storage, table_name)?
                 .map_or_else(HashMap::new, |schema| {
                     HashMap::from([(table_name.to_owned(), schema)])
                 });
@@ -339,7 +335,7 @@ where
 {
     match source {
         SourcePlan::Table(table) => {
-            let schema = storage.fetch_schema(&table.name)?;
+            let schema = trace::fetch_schema(storage, &table.name)?;
             let schema_list: HashMap<String, Schema> = schema.map_or_else(HashMap::new, |schema| {
                 HashMap::from([(table.name.clone(), schema)])
             });

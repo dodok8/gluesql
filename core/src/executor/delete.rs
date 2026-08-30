@@ -7,7 +7,7 @@ use {
         ast::{BinaryOperator, ForeignKey, ReferentialAction},
         plan::ExprPlan,
         result::Result,
-        store::{GStore, GStoreMut},
+        store::{GStore, GStoreMut, trace},
     },
     serde::Serialize,
     std::rc::Rc,
@@ -29,8 +29,7 @@ pub fn delete<T: GStore + GStoreMut>(
     selection: Option<&ExprPlan>,
 ) -> Result<Payload> {
     let columns = Rc::from(fetch_columns(storage, table_name)?);
-    let referencings = storage
-        .fetch_referencings(table_name)?
+    let referencings = trace::fetch_referencings(storage, table_name)?
         .into_iter()
         .map(|referencing| {
             fetch_columns(storage, &referencing.table_name)
@@ -102,7 +101,5 @@ pub fn delete<T: GStore + GStoreMut>(
         drop(collect_entered);
     }
 
-    storage
-        .delete_data(table_name, keys)
-        .map(|()| Payload::Delete(num_keys))
+    trace::delete_data(storage, table_name, keys).map(|()| Payload::Delete(num_keys))
 }

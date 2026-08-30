@@ -12,7 +12,7 @@ use {
         },
         plan::{TableAccessPlan, TableSourcePlan},
         result::Result,
-        store::GStore,
+        store::{GStore, trace},
     },
     std::{iter, rc::Rc},
 };
@@ -90,7 +90,7 @@ fn rows<'a, T: GStore>(
             Box::new(rows) as Box<dyn Iterator<Item = Result<Row>> + 'a>
         }
         TableAccessPlan::PrimaryKey { expr } => {
-            let schema = storage.fetch_schema(&table.name)?.ok_or_else(|| {
+            let schema = trace::fetch_schema(storage, &table.name)?.ok_or_else(|| {
                 QueryError::UnreachableTableSchemaMissingAfterPreparation(table.name.clone())
             })?;
             let evaluated = evaluate(storage, evaluation_context, None, expr)?;

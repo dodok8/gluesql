@@ -5,7 +5,7 @@ use {
         data::{Key, Row, SCHEMALESS_DOC_COLUMN, Value},
         plan::ExprPlan,
         result::Result,
-        store::{GStore, RowIter},
+        store::{GStore, RowIter, trace},
     },
     serde::Serialize,
     std::{borrow::Cow, fmt::Debug, rc::Rc},
@@ -25,32 +25,12 @@ fn trace_access_path(access_path: &'static str) {
     tracing::debug!(target: "gluesql", access_path, "selected query access path");
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(
-        name = "gluesql.storage.scan_data",
-        target = "gluesql",
-        level = "trace",
-        skip_all,
-        fields(storage.type = std::any::type_name::<T>())
-    )
-)]
 pub(crate) fn trace_scan<'a, T: GStore>(storage: &'a T, table_name: &str) -> Result<RowIter<'a>> {
     #[cfg(feature = "tracing")]
     trace_access_path("full_scan");
-    storage.scan_data(table_name)
+    trace::scan_data(storage, table_name)
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(
-        name = "gluesql.storage.scan_indexed_data",
-        target = "gluesql",
-        level = "trace",
-        skip_all,
-        fields(storage.type = std::any::type_name::<T>())
-    )
-)]
 pub(crate) fn trace_index_scan<'a, T: GStore>(
     storage: &'a T,
     table_name: &str,
@@ -60,19 +40,9 @@ pub(crate) fn trace_index_scan<'a, T: GStore>(
 ) -> Result<RowIter<'a>> {
     #[cfg(feature = "tracing")]
     trace_access_path("secondary_index");
-    storage.scan_indexed_data(table_name, index_name, asc, cmp_value)
+    trace::scan_indexed_data(storage, table_name, index_name, asc, cmp_value)
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(
-        name = "gluesql.storage.fetch_data",
-        target = "gluesql",
-        level = "trace",
-        skip_all,
-        fields(storage.type = std::any::type_name::<T>())
-    )
-)]
 pub(crate) fn trace_fetch<T: GStore>(
     storage: &T,
     table_name: &str,
@@ -80,7 +50,7 @@ pub(crate) fn trace_fetch<T: GStore>(
 ) -> Result<Option<Vec<Value>>> {
     #[cfg(feature = "tracing")]
     trace_access_path("primary_key");
-    storage.fetch_data(table_name, key)
+    trace::fetch_data(storage, table_name, key)
 }
 
 pub fn fetch<'a, T: GStore>(
@@ -117,8 +87,7 @@ pub fn fetch<'a, T: GStore>(
 }
 
 pub fn fetch_columns<T: GStore>(storage: &T, table_name: &str) -> Result<Vec<String>> {
-    let columns = storage
-        .fetch_schema(table_name)?
+    let columns = trace::fetch_schema(storage, table_name)?
         .ok_or_else(|| FetchError::TableNotFound(table_name.to_owned()))?
         .column_defs
         .map_or_else(

@@ -6,7 +6,7 @@ use {
         executor::context::RowContext,
         plan::DictionarySourcePlan,
         result::Result,
-        store::GStore,
+        store::{GStore, trace},
     },
     std::{collections::BTreeMap, iter, rc::Rc},
 };
@@ -70,10 +70,9 @@ fn rows<'a, T: GStore>(
     let columns = Rc::clone(&source.names);
     let rows = match &dictionary.dictionary {
         Dictionary::GlueObjects => {
-            let schemas = storage.fetch_all_schemas()?;
-            let table_metas = storage
-                .scan_table_meta()?
-                .collect::<Result<BTreeMap<_, _>>>()?;
+            let schemas = trace::fetch_all_schemas(storage)?;
+            let table_metas =
+                trace::scan_table_meta(storage)?.collect::<Result<BTreeMap<_, _>>>()?;
             let rows = schemas.into_iter().flat_map({
                 let columns = Rc::clone(&columns);
 
@@ -114,7 +113,7 @@ fn rows<'a, T: GStore>(
             Box::new(rows.map(Ok)) as Box<dyn Iterator<Item = Result<Row>> + 'a>
         }
         Dictionary::GlueTables => {
-            let schemas = storage.fetch_all_schemas()?;
+            let schemas = trace::fetch_all_schemas(storage)?;
             let rows = schemas.into_iter().map({
                 let columns = Rc::clone(&columns);
 
@@ -132,7 +131,7 @@ fn rows<'a, T: GStore>(
             Box::new(rows)
         }
         Dictionary::GlueTableColumns => {
-            let schemas = storage.fetch_all_schemas()?;
+            let schemas = trace::fetch_all_schemas(storage)?;
             let rows = schemas.into_iter().flat_map({
                 let columns = Rc::clone(&columns);
 
@@ -171,7 +170,7 @@ fn rows<'a, T: GStore>(
             Box::new(rows.map(Ok))
         }
         Dictionary::GlueIndexes => {
-            let schemas = storage.fetch_all_schemas()?;
+            let schemas = trace::fetch_all_schemas(storage)?;
             let rows = schemas.into_iter().flat_map({
                 let columns = Rc::clone(&columns);
 

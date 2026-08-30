@@ -5,7 +5,7 @@ use {
         data::{Key, Row, Value},
         plan::AssignmentPlan,
         result::Result,
-        store::GStore,
+        store::{GStore, trace},
     },
     serde::Serialize,
     std::{borrow::Cow, fmt::Debug, rc::Rc},
@@ -112,10 +112,12 @@ impl<'a, T: GStore> Update<'a, T> {
                         continue;
                     }
 
-                    let no_referenced = self
-                        .storage
-                        .fetch_data(referenced_table_name, &Key::try_from(&value)?)?
-                        .is_none();
+                    let no_referenced = trace::fetch_data(
+                        self.storage,
+                        referenced_table_name,
+                        &Key::try_from(&value)?,
+                    )?
+                    .is_none();
 
                     if no_referenced {
                         return Err(UpdateError::CannotFindReferencedValue {

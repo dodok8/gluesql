@@ -5,7 +5,7 @@ use {
         data::{Schema, SchemaIndex},
         plan::AlterTableOperationPlan,
         result::Result,
-        store::{GStore, GStoreMut},
+        store::{GStore, GStoreMut, trace},
     },
 };
 
@@ -20,7 +20,7 @@ pub fn alter_table<T: GStore + GStoreMut>(
     }
     | AlterTableOperationPlan::DropColumn { column_name, .. } = operation
     {
-        if let Some(schema) = storage.fetch_schema(table_name)? {
+        if let Some(schema) = trace::fetch_schema(storage, table_name)? {
             let referencing_foreign_key = schema
                 .foreign_keys
                 .into_iter()
@@ -37,7 +37,7 @@ pub fn alter_table<T: GStore + GStoreMut>(
             }
         }
 
-        let referencings = storage.fetch_referencings(table_name)?;
+        let referencings = trace::fetch_referencings(storage, table_name)?;
         let referencing = referencings
             .into_iter()
             .find(|Referencing { foreign_key, .. }| {
@@ -52,21 +52,21 @@ pub fn alter_table<T: GStore + GStoreMut>(
     match operation {
         AlterTableOperationPlan::RenameTable {
             table_name: new_table_name,
-        } => storage.rename_schema(table_name, new_table_name),
+        } => trace::rename_schema(storage, table_name, new_table_name),
         AlterTableOperationPlan::RenameColumn {
             old_column_name,
             new_column_name,
-        } => storage.rename_column(table_name, old_column_name, new_column_name),
+        } => trace::rename_column(storage, table_name, old_column_name, new_column_name),
         AlterTableOperationPlan::AddColumn { column_def } => {
             validate(column_def)?;
 
-            storage.add_column(table_name, column_def)
+            trace::add_column(storage, table_name, column_def)
         }
         AlterTableOperationPlan::DropColumn {
             column_name,
             if_exists,
         } => {
-            let Some(Schema { indexes, .. }) = storage.fetch_schema(table_name)? else {
+            let Some(Schema { indexes, .. }) = trace::fetch_schema(storage, table_name)? else {
                 return Err(AlterError::TableNotFound(table_name.to_owned()).into());
             };
 
@@ -76,10 +76,10 @@ pub fn alter_table<T: GStore + GStoreMut>(
                 .map(|SchemaIndex { name, .. }| name);
 
             for index_name in indexes {
-                storage.drop_index(table_name, index_name)?;
+                trace::drop_index(storage, table_name, index_name)?;
             }
 
-            storage.drop_column(table_name, column_name, *if_exists)
+            trace::drop_column(storage, table_name, column_name, *if_exists)
         }
     }
 }

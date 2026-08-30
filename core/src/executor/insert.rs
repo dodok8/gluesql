@@ -7,7 +7,7 @@ use crate::{
     data::{Key, Schema, Value},
     plan::QueryPlan,
     result::Result,
-    store::{GStore, GStoreMut},
+    store::{GStore, GStoreMut, trace},
 };
 pub use error::InsertError;
 
@@ -26,8 +26,7 @@ pub fn insert<T: GStore + GStoreMut>(
         column_defs,
         foreign_keys,
         ..
-    } = storage
-        .fetch_schema(table_name)?
+    } = trace::fetch_schema(storage, table_name)?
         .ok_or_else(|| InsertError::TableNotFound(table_name.to_owned()))?;
 
     let rows = match column_defs {
@@ -46,12 +45,12 @@ pub fn insert<T: GStore + GStoreMut>(
         RowsData::Append(rows) => {
             let num_rows = rows.len();
 
-            storage.append_data(table_name, rows).map(|()| num_rows)
+            trace::append_data(storage, table_name, rows).map(|()| num_rows)
         }
         RowsData::Insert(rows) => {
             let num_rows = rows.len();
 
-            storage.insert_data(table_name, rows).map(|()| num_rows)
+            trace::insert_data(storage, table_name, rows).map(|()| num_rows)
         }
     }
 }

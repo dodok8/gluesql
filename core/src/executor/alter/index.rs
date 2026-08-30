@@ -5,7 +5,7 @@ use {
         data::Schema,
         plan::{ExprPlan, FunctionExprPlan, plan_scalar_expr},
         result::Result,
-        store::{GStore, GStoreMut},
+        store::{GStore, GStoreMut, trace},
     },
 };
 
@@ -16,8 +16,7 @@ pub fn create_index<T: GStore + GStoreMut>(
     column: &OrderByExpr,
 ) -> Result<()> {
     let expr = plan_scalar_expr(column.expr.clone());
-    let Schema { column_defs, .. } = storage
-        .fetch_schema(table_name)?
+    let Schema { column_defs, .. } = trace::fetch_schema(storage, table_name)?
         .ok_or_else(|| AlterError::TableNotFound(table_name.to_owned()))?;
     let columns = column_defs
         .unwrap_or_default()
@@ -32,7 +31,7 @@ pub fn create_index<T: GStore + GStoreMut>(
         return Err(AlterError::IndexExprRequiresColumnReference.into());
     }
 
-    storage.create_index(table_name, index_name, column)
+    trace::create_index(storage, table_name, index_name, column)
 }
 
 fn validate_index_expr(columns: &[String], expr: &ExprPlan) -> (bool, bool) {

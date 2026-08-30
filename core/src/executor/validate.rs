@@ -3,7 +3,7 @@ use {
         ast::{ColumnDef, ColumnUniqueOption},
         data::{Key, Value},
         result::Result,
-        store::Store,
+        store::{Store, trace},
     },
     im::HashSet,
     serde::Serialize,
@@ -132,7 +132,7 @@ pub fn validate_unique<'a, T: Store>(
             {
                 let key = primary_key?;
 
-                if storage.fetch_data(table_name, &key)?.is_some() {
+                if trace::fetch_data(storage, table_name, &key)?.is_some() {
                     return Err(ValidateError::DuplicateEntryOnPrimaryKeyField(key).into());
                 }
             }
@@ -147,7 +147,7 @@ pub fn validate_unique<'a, T: Store>(
 
             #[cfg(feature = "tracing")]
             let mut scanned_rows = 0_usize;
-            for row in storage.scan_data(table_name)? {
+            for row in trace::scan_data(storage, table_name)? {
                 let (_, values) = row?;
                 #[cfg(feature = "tracing")]
                 {

@@ -20,7 +20,7 @@ use {
             TableAliasPlan,
         },
         result::{Error, Result},
-        store::{GStore, GStoreMut, Transaction},
+        store::{GStore, GStoreMut, Transaction, trace},
     },
     serde::{Deserialize, Serialize},
     std::{
@@ -104,49 +104,16 @@ pub enum PayloadVariable {
     Version(String),
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(
-        name = "gluesql.storage.begin",
-        target = "gluesql",
-        level = "trace",
-        skip_all,
-        fields(
-            autocommit = autocommit,
-            storage.type = std::any::type_name::<T>()
-        )
-    )
-)]
 fn begin_transaction<T: Transaction>(storage: &mut T, autocommit: bool) -> Result<bool> {
-    storage.begin(autocommit)
+    trace::begin(storage, autocommit)
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(
-        name = "gluesql.storage.commit",
-        target = "gluesql",
-        level = "trace",
-        skip_all,
-        fields(storage.type = std::any::type_name::<T>())
-    )
-)]
 fn commit_transaction<T: Transaction>(storage: &mut T) -> Result<()> {
-    storage.commit()
+    trace::commit(storage)
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    tracing::instrument(
-        name = "gluesql.storage.rollback",
-        target = "gluesql",
-        level = "trace",
-        skip_all,
-        fields(storage.type = std::any::type_name::<T>())
-    )
-)]
 fn rollback_transaction<T: Transaction>(storage: &mut T) -> Result<()> {
-    storage.rollback()
+    trace::rollback(storage)
 }
 
 pub fn execute<T: GStore + GStoreMut>(
@@ -219,9 +186,9 @@ fn execute_inner<T: GStore + GStoreMut>(
             table_name,
             column,
         } => create_index(storage, table_name, name, column).map(|()| Payload::CreateIndex),
-        StatementPlan::DropIndex { name, table_name } => storage
-            .drop_index(table_name, name)
-            .map(|()| Payload::DropIndex),
+        StatementPlan::DropIndex { name, table_name } => {
+            trace::drop_index(storage, table_name, name).map(|()| Payload::DropIndex)
+        }
         //- Transaction
         StatementPlan::StartTransaction => {
             begin_transaction(storage, false).map(|_| Payload::StartTransaction)
@@ -243,8 +210,7 @@ fn execute_inner<T: GStore + GStoreMut>(
                 column_defs,
                 foreign_keys,
                 ..
-            } = storage
-                .fetch_schema(table_name)?
+            } = trace::fetch_schema(storage, table_name)?
                 .ok_or_else(|| ExecuteError::TableNotFound(table_name.to_owned()))?;
 
             let all_columns = column_defs.as_deref().map_or_else(
@@ -299,9 +265,7 @@ fn execute_inner<T: GStore + GStoreMut>(
                 .map(|(key, row)| (key, row.into_values()))
                 .collect();
 
-            storage
-                .insert_data(table_name, rows)
-                .map(|()| Payload::Update(num_rows))
+            trace::insert_data(storage, table_name, rows).map(|()| Payload::Update(num_rows))
         }
         StatementPlan::Delete {
             table_name,
@@ -311,8 +275,7 @@ fn execute_inner<T: GStore + GStoreMut>(
         //- Selection
         StatementPlan::Query(query) => select::execute(storage, query),
         StatementPlan::ShowColumns { table_name } => {
-            let Schema { column_defs, .. } = storage
-                .fetch_schema(table_name)?
+            let Schema { column_defs, .. } = trace::fetch_schema(storage, table_name)?
                 .ok_or_else(|| ExecuteError::TableNotFound(table_name.to_owned()))?;
 
             let output: Vec<(String, DataType)> = column_defs
@@ -381,8 +344,7 @@ fn execute_inner<T: GStore + GStoreMut>(
                 Ok(Payload::ShowVariable(PayloadVariable::Tables(table_names)))
             }
             Variable::Functions => {
-                let mut function_desc: Vec<_> = storage
-                    .fetch_all_functions()?
+                let mut function_desc: Vec<_> = trace::fetch_all_functions(storage)?
                     .iter()
                     .map(|f| f.to_str())
                     .collect();

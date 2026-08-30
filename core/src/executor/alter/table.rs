@@ -13,7 +13,7 @@ use {
         },
         prelude::{DataType, Value},
         result::Result,
-        store::{GStore, GStoreMut},
+        store::{GStore, GStoreMut, trace},
     },
     serde::Serialize,
     std::fmt,
@@ -46,7 +46,7 @@ pub fn create_table<T: GStore + GStoreMut>(
         Some(source_query) => match query::output_body(source_query) {
             OutputBody::Project(project) => match source_for_schema_copy(project) {
                 Some(SourcePlan::Table(table)) => {
-                    let schema = storage.fetch_schema(&table.name)?;
+                    let schema = trace::fetch_schema(storage, &table.name)?;
                     let Schema {
                         column_defs: source_column_defs,
                         ..
@@ -141,12 +141,10 @@ pub fn create_table<T: GStore + GStoreMut>(
         let column_defs = if referenced_table_name == target_table_name {
             target_columns_defs.clone()
         } else {
-            let referenced_schema =
-                storage
-                    .fetch_schema(referenced_table_name)?
-                    .ok_or_else(|| {
-                        AlterError::ReferencedTableNotFound(referenced_table_name.to_owned())
-                    })?;
+            let referenced_schema = trace::fetch_schema(storage, referenced_table_name)?
+                .ok_or_else(|| {
+                    AlterError::ReferencedTableNotFound(referenced_table_name.to_owned())
+                })?;
 
             referenced_schema.column_defs
         };
@@ -190,7 +188,7 @@ pub fn create_table<T: GStore + GStoreMut>(
         }
     }
 
-    if storage.fetch_schema(target_table_name)?.is_none() {
+    if trace::fetch_schema(storage, target_table_name)?.is_none() {
         let schema = Schema {
             table_name: target_table_name.to_owned(),
             column_defs: target_columns_defs,
@@ -200,7 +198,7 @@ pub fn create_table<T: GStore + GStoreMut>(
             comment: comment.clone(),
         };
 
-        storage.insert_schema(&schema)?;
+        trace::insert_schema(storage, &schema)?;
     } else if !if_not_exists {
         return Err(AlterError::TableAlreadyExists(target_table_name.to_owned()).into());
     }
@@ -214,7 +212,7 @@ pub fn create_table<T: GStore + GStoreMut>(
                     .collect::<Result<Vec<_>>>()?,
             };
 
-            storage.append_data(target_table_name, rows)
+            trace::append_data(storage, target_table_name, rows)
         }
         None => Ok(()),
     }
@@ -277,7 +275,7 @@ pub fn drop_table<T: GStore + GStoreMut>(
     let mut n = 0;
 
     for table_name in table_names {
-        let schema = storage.fetch_schema(table_name)?;
+        let schema = trace::fetch_schema(storage, table_name)?;
 
         match (schema, if_exists) {
             (None, true) => {
@@ -289,7 +287,7 @@ pub fn drop_table<T: GStore + GStoreMut>(
             _ => {}
         }
 
-        let referencings = storage.fetch_referencings(table_name)?;
+        let referencings = trace::fetch_referencings(storage, table_name)?;
 
         if !referencings.is_empty() && !cascade {
             return Err(AlterError::CannotDropTableWithReferencing {
@@ -304,15 +302,14 @@ pub fn drop_table<T: GStore + GStoreMut>(
             foreign_key: ForeignKey { name, .. },
         } in referencings
         {
-            let mut schema = storage
-                .fetch_schema(&table_name)?
+            let mut schema = trace::fetch_schema(storage, &table_name)?
                 .ok_or_else(|| AlterError::TableNotFound(table_name.clone()))?;
             schema
                 .foreign_keys
                 .retain(|foreign_key| foreign_key.name != name);
-            storage.insert_schema(&schema)?;
+            trace::insert_schema(storage, &schema)?;
         }
-        storage.delete_schema(table_name)?;
+        trace::delete_schema(storage, table_name)?;
 
         n += 1;
     }

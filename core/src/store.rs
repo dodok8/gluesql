@@ -3,6 +3,7 @@ mod function;
 mod index;
 mod metadata;
 mod planner;
+pub(crate) mod trace;
 mod transaction;
 
 pub trait GStore: Store + Index + Metadata + CustomFunction {}
@@ -45,7 +46,7 @@ pub trait Store {
     fn scan_data<'a>(&'a self, table_name: &str) -> Result<RowIter<'a>>;
 
     fn fetch_referencings(&self, table_name: &str) -> Result<Vec<Referencing>> {
-        let schemas = self.fetch_all_schemas()?;
+        let schemas = trace::fetch_all_schemas(self)?;
 
         Ok(schemas
             .into_iter()
