@@ -48,7 +48,7 @@ Optional CLI exporter features build on the same instrumentation:
 
 `tracing-flame` and `opentelemetry` both enable `tracing` and can be enabled together.
 
-### Try Redb tracing locally
+### Try tracing locally
 
 From the repository root, build the CLI with tracing enabled:
 
@@ -56,14 +56,11 @@ From the repository root, build the CLI with tracing enabled:
 cargo build -p gluesql-cli --features tracing
 ```
 
-Start the CLI with RedbStorage and trace-level logging. Use a new database path if the example has
-already been run:
+Start the CLI with its default in-memory storage and trace-level logging:
 
 ```sh
 RUST_LOG=gluesql=trace \
-./target/debug/gluesql-cli \
-  --storage redb \
-  --path /tmp/gluesql-tracing-demo.redb
+./target/debug/gluesql-cli
 ```
 
 Run these statements at the `gluesql>` prompt:
@@ -83,31 +80,24 @@ SELECT * FROM Items WHERE id = 1;
 SELECT * FROM Items;
 ```
 
-The query with the primary-key predicate emits `gluesql.storage.fetch_data` and
-`gluesql.redb.fetch_data`. The query without a predicate uses a full scan and emits
-`gluesql.storage.scan_data`, `gluesql.redb.scan_data`, and
-`gluesql.redb.scan_rows{row_count=3}`.
+The query with the primary-key predicate emits `gluesql.storage.fetch_data` with
+`storage.type="gluesql_memory_storage::MemoryStorage"`. The query without a predicate uses a full
+scan and emits `gluesql.storage.scan_data`. The same generic spans are available for every storage
+used through `Glue`; only `storage.type` changes.
 
 Tracing output is written to standard error. Redirect it to a file while keeping query results in
 the terminal:
 
 ```sh
 RUST_LOG=gluesql=trace \
-./target/debug/gluesql-cli \
-  --storage redb \
-  --path /tmp/gluesql-tracing-demo.redb \
-  2> /tmp/gluesql-trace.log
+./target/debug/gluesql-cli 2> ~/gluesql-trace.log
 ```
 
 Follow the trace from another terminal:
 
 ```sh
-tail -f /tmp/gluesql-trace.log
+tail -f ~/gluesql-trace.log
 ```
-
-For `gluesql.redb.scan_rows`, `time.busy` is time spent reading and deserializing rows,
-`time.idle` is time spent by the consumer between iterator reads, and `row_count` is the number of
-items yielded by the iterator.
 
 ## Library logging
 
@@ -150,22 +140,12 @@ gluesql.execute
 │       └── gluesql.storage.fetch_schema
 └── gluesql.execute_statement
     ├── gluesql.storage.begin
-    │   └── gluesql.redb.begin
     ├── gluesql.storage.fetch_data
-    │   └── gluesql.redb.fetch_data
     ├── gluesql.storage.scan_data
-    │   └── gluesql.redb.scan_data
-    ├── gluesql.redb.scan_rows
     ├── gluesql.storage.scan_indexed_data
     ├── gluesql.storage.commit
-    │   └── gluesql.redb.commit
     └── gluesql.storage.rollback
-        └── gluesql.redb.rollback
 ```
-
-The `gluesql.redb.*` spans are emitted when RedbStorage and its `tracing` feature are enabled. The
-top-level `gluesql` and CLI `tracing` features enable Redb instrumentation when they include
-RedbStorage.
 
 Every generic `gluesql.storage.*` span records `storage.type` using the concrete Rust storage type.
 New storage implementations therefore receive identifiable trait-boundary spans through
@@ -220,10 +200,18 @@ full_scan
 `scan_data` and `scan_indexed_data` return lazy iterators. Their generic storage spans measure
 iterator creation, not the complete scan; `gluesql.execute_statement` includes subsequent iterator
 consumption.
-RedbStorage additionally emits `gluesql.redb.scan_rows` from the first iterator read until the
-iterator is dropped. Its busy duration measures Redb row reads and deserialization, its idle
-duration covers time spent by the consumer between reads, and its `row_count` field records the
-number of yielded items.
+
+### Backend-specific spans
+
+Generic spans are the portable observability contract. A storage may optionally add child spans
+for work below its trait boundary. RedbStorage is the first reference implementation: when its
+`tracing` feature is enabled, it emits `gluesql.redb.*` spans for database operations and
+`gluesql.redb.scan_rows{row_count=...}` for lazy iterator consumption. These Redb spans are an
+example, not a requirement for other storages.
+
+For `gluesql.redb.scan_rows`, the busy duration measures row reads and deserialization, the idle
+duration covers time spent by the consumer between reads, and `row_count` records the number of
+yielded items.
 
 When `tracing` is enabled, eager execution boundaries also expose the number of items retained for
 the operation. These fields can be aligned with RSS samples to identify which operation overlaps a
@@ -243,11 +231,31 @@ memory increase:
 The counts describe logical items rather than allocated bytes. Use the RSS counter for process
 memory and these spans to locate the corresponding execution boundary.
 
-## Resource benchmark example
+## Resource benchmark profiles
 
-RedbStorage provides a single-run example that groups query spans and resource measurements under
-one `gluesql.benchmark.run` span. The example is available only when the `tracing` feature is
-enabled.
+A resource benchmark groups one SQL workload, query spans, and resource measurements under a
+`gluesql.benchmark.run` span. The field names and Firefox Profiler representation below are shared
+across storage implementations. The current runnable reference is in the RedbStorage crate; it is
+not the definition of the generic storage tracing contract.
+
+Execute the SQL file once and use its filename without the extension as `benchmark.name`. The
+closing benchmark span uses these storage-independent fields:
+
+| Field | Meaning |
+| --- | --- |
+| `process.memory.peak_bytes` | Peak resident set size of the benchmark process |
+| `gluesql.database.size_bytes` | Storage-owned persistent data size after the workload, when measurable |
+| `process.executable.size_bytes` | Benchmark executable file size |
+
+At `debug` or `trace` level, a benchmark can also emit current RSS samples under the run span:
+
+```text
+gluesql.benchmark.memory_sample elapsed_ms=20 rss_bytes=18874368
+```
+
+### Run the RedbStorage reference
+
+The reference example is available only when its `tracing` feature is enabled.
 
 Run a SQL workload against a new Redb database path:
 
@@ -259,22 +267,6 @@ cargo run --release \
   --features tracing \
   -- /tmp/gluesql-benchmark.redb \
   storages/redb-storage/examples/resource_benchmark.sql
-```
-
-The SQL file is executed once. Its filename without the extension becomes `benchmark.name`. The
-closing `gluesql.benchmark.run` span includes these fields:
-
-| Field | Meaning |
-| --- | --- |
-| `process.memory.peak_bytes` | Peak resident set size of the benchmark process |
-| `gluesql.database.size_bytes` | Redb database file size after the workload |
-| `process.executable.size_bytes` | Benchmark executable file size |
-
-At `debug` or `trace` level, the example also samples current RSS and emits events under the
-benchmark span:
-
-```text
-gluesql.benchmark.memory_sample elapsed_ms=20 rss_bytes=18874368
 ```
 
 The default interval is 10 milliseconds. Set `GLUESQL_MEMORY_SAMPLE_MS` to use a different
@@ -457,9 +449,7 @@ OTEL_SERVICE_NAME=gluesql-cli \
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 \
 OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf \
 RUST_LOG=gluesql=trace \
-./target/debug/gluesql-cli \
-  --storage redb \
-  --path /tmp/gluesql-tracing-demo.redb
+./target/debug/gluesql-cli
 ```
 
 The CLI exports completed spans to `/v1/traces` and flushes pending batches when it exits. The
@@ -531,11 +521,9 @@ Run a workload and choose the folded output path with `GLUESQL_FLAMEGRAPH_PATH`.
 is `tracing.folded`.
 
 ```sh
-GLUESQL_FLAMEGRAPH_PATH=/tmp/gluesql.folded \
+GLUESQL_FLAMEGRAPH_PATH=~/gluesql.folded \
 RUST_LOG=gluesql=trace \
-./target/debug/gluesql-cli \
-  --storage redb \
-  --path /tmp/gluesql-tracing-demo.redb
+./target/debug/gluesql-cli
 ```
 
 After exiting the CLI, generate an SVG with Inferno:
@@ -545,7 +533,7 @@ cargo install inferno
 ```
 
 ```sh
-inferno-flamegraph < /tmp/gluesql.folded > /tmp/gluesql.svg
+inferno-flamegraph < ~/gluesql.folded > ~/gluesql.svg
 ```
 
 The CLI keeps empty samples out of the folded output so time waiting at the interactive prompt
