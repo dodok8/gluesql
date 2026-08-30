@@ -8,9 +8,10 @@ GlueSQL can emit structured spans and events for query execution when the option
 feature is enabled. The feature is disabled by default, so applications that do not use
 observability do not compile the instrumentation or its dependency.
 
-GlueSQL does not install a global subscriber when used as a library. Applications can connect the
-emitted data to `tracing-subscriber`, OpenTelemetry, or `tracing-flame`. The GlueSQL CLI installs a
-formatted subscriber automatically when it is built with the feature.
+When `tracing` is enabled, `Glue::new` installs a formatted default subscriber if the process has
+not already configured one. Applications can install their own `tracing-subscriber`, OpenTelemetry,
+or `tracing-flame` subscriber before constructing `Glue`; GlueSQL detects and preserves it. The
+GlueSQL CLI configures its exporter layers before constructing `Glue`.
 
 ## CLI logging
 
@@ -101,15 +102,27 @@ tail -f ~/gluesql-trace.log
 
 ## Library logging
 
-Enable GlueSQL instrumentation and add a subscriber in the application:
+Enable GlueSQL instrumentation:
 
 ```toml
 [dependencies]
 gluesql = { version = "0.19", features = ["tracing"] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ```
 
-Install the subscriber once, before executing queries:
+No initialization call is required. `Glue::new` reads `RUST_LOG` and installs a formatted
+subscriber with span-close events when no dispatcher has previously been set:
+
+```rust
+let mut glue = Glue::new(storage);
+glue.execute("SELECT * FROM Items")?;
+```
+
+To use a custom subscriber, install it before constructing `Glue`:
+
+```toml
+[dependencies]
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+```
 
 ```rust
 use tracing_subscriber::{EnvFilter, fmt::format::FmtSpan};
@@ -123,21 +136,21 @@ tracing_subscriber::fmt()
     .init();
 ```
 
-Libraries should not install their own global subscriber. If the host application already uses
-`tracing`, enabling GlueSQL's feature is sufficient; the existing subscriber receives GlueSQL
-spans under the `gluesql` target.
+The existing subscriber then receives GlueSQL spans under the `gluesql` target, and GlueSQL does
+not replace it.
 
 ## Span hierarchy
 
 The initial instrumentation follows the query execution pipeline:
 
 ```text
-gluesql.execute
-├── gluesql.parse
-├── gluesql.translate
-├── gluesql.plan
-│   └── gluesql.storage.plan
-│       └── gluesql.storage.fetch_schema
+gluesql.execute { sql, params }
+├── gluesql.plan_sql { sql, params }
+│   ├── gluesql.parse
+│   ├── gluesql.translate
+│   └── gluesql.plan
+│       └── gluesql.storage.plan
+│           └── gluesql.storage.fetch_schema
 └── gluesql.execute_statement
     ├── gluesql.storage.begin
     ├── gluesql.storage.fetch_data
@@ -180,14 +193,57 @@ For wrapper or composite storages, `storage.type` identifies the outer type pass
 an internal dispatch span only when the selected inner backend must also be visible.
 
 Calls made directly to a storage trait method outside the GlueSQL planner and executor do not pass
-through these Core boundaries. Add an optional `tracing` feature to the storage crate only when it
-needs spans for those direct calls or for backend-specific work below the trait boundary. Storage
-crates should not install a subscriber; the CLI or host application owns subscriber configuration.
+through these Core boundaries. Use `instrument_storage` when the storage also needs those direct
+calls, method arguments, errors, or lazy iterator consumption to be observable.
 
-Use backend-specific spans only when they add information that the generic boundary cannot expose.
-For example, a storage can instrument iterator consumption, serialization, network requests, or
-transaction flushes. Use the `gluesql.<storage>.<operation>` naming pattern and avoid recording SQL
-text, keys, row values, or one span per row.
+Add the optional macro and tracing dependencies to the storage crate:
+
+```toml
+[features]
+tracing = ["dep:gluesql-macros", "dep:tracing", "gluesql-core/tracing"]
+
+[dependencies]
+gluesql-macros = { version = "0.19", optional = true }
+tracing = { version = "0.1", optional = true }
+```
+
+Apply the attribute to each implemented trait without changing the method bodies or call sites:
+
+```rust
+#[cfg_attr(
+    feature = "tracing",
+    gluesql_macros::instrument_storage(
+        name = "my_storage",
+        capture = "full",
+        iterator = "full"
+    )
+)]
+impl Store for MyStorage {
+    // Existing implementation
+}
+```
+
+`capture = "full"` records every simple named argument with its `Debug` representation, records
+`row_count` for arguments named `rows` or `keys`, and records `Result` errors. Use
+`capture = "off"` to keep only timing. The generated span name follows
+`gluesql.<storage>.<method>`.
+
+With `iterator = "full"`, `scan_data` and `scan_indexed_data` results are wrapped automatically.
+The wrapper emits each yielded row or error as an event and records `row_count`, `error_count`, and
+`completed` when dropped. For an iterator-returning method on any other trait, mark it inside the
+attributed implementation:
+
+```rust
+#[trace_iterator]
+fn stream(&self) -> Result<Box<dyn Iterator<Item = Result<Row>>>> {
+    // Existing implementation
+}
+```
+
+The attribute works on inherent implementations and external traits as well as GlueSQL storage
+traits. Iterator methods must return a `Result` whose success value is a boxed iterator of
+`Result` items. No subscriber setup is needed when calls begin through `Glue`; direct calls made
+before `Glue::new` use any subscriber already installed by the application.
 
 Access-path events use one of these stable values:
 
@@ -333,14 +389,16 @@ storages/redb-storage/Cargo.toml
 ```
 
 First add a `tracing` feature to the target storage crate. It must enable the optional `tracing`
-dependency and `gluesql-core/tracing`. Register the example with `required-features = ["tracing"]`
-so its tracing and RSS dependencies are not compiled for normal storage users:
+and `gluesql-macros` dependencies together with `gluesql-core/tracing`. Register the example with
+`required-features = ["tracing"]` so its tracing and RSS dependencies are not compiled for normal
+storage users:
 
 ```toml
 [features]
-tracing = ["dep:tracing", "gluesql-core/tracing"]
+tracing = ["dep:gluesql-macros", "dep:tracing", "gluesql-core/tracing"]
 
 [dependencies]
+gluesql-macros = { version = "0.19", optional = true }
 tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
@@ -386,9 +444,10 @@ Use the storage type to decide how `gluesql.database.size_bytes` is populated:
 | Remote service | Leave the local field empty; report a server-side metric separately if available |
 
 The generic `gluesql.storage.*` spans are available through `gluesql-core/tracing` without adding
-backend-specific instrumentation. Add internal spans such as `gluesql.<storage>.*` only when the
-storage implementation has a concrete diagnostic boundary to expose. Avoid per-row spans; for a
-lazy iterator, use one span covering iterator consumption and record the final row count.
+backend-specific instrumentation. Apply `instrument_storage` as described above when direct
+storage calls or storage-specific arguments must be visible. With `iterator = "full"`, the macro
+uses one span for lazy iterator consumption, records its final row count, and emits row events
+rather than creating a span for every row.
 
 Firefox Profiler support is optional. To include it, copy the `firefox_profile.rs` support module
 without changing its marker and counter names, retain `GLUESQL_FIREFOX_PROFILE_PATH` as the output
@@ -566,13 +625,14 @@ profiler. Use `perf` or `cargo-flamegraph` when function-level CPU samples are r
 
 ## Data handling
 
-GlueSQL does not record the following values in its default instrumentation:
+Full tracing deliberately records query and storage values that may contain sensitive data:
 
-- SQL source text
-- Bound parameters
-- Row contents
-- Full error messages
+- `gluesql.execute` and `gluesql.plan_sql` record SQL source text and bound parameters.
+- `instrument_storage(capture = "full")` records simple named method arguments, including keys,
+  schemas, and rows, together with `Result` errors.
+- `instrument_storage(iterator = "full")` emits an event for every yielded row or error.
 
-The default fields are limited to stable execution metadata such as the access path and
-transaction mode. Applications that add their own fields or layers are responsible for applying
-their data retention and access-control policies.
+Enable tracing only in environments where this data is acceptable. Use `capture = "off"` when a
+storage needs timing without argument and error values, and use an appropriate `RUST_LOG` filter
+to limit event volume. Applications are responsible for redaction, retention, and access-control
+policies in their selected subscriber or exporter.
