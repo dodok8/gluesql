@@ -153,7 +153,12 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
                     "traced iterator methods must return `Result<Box<dyn Iterator<...>>>`",
                 )
             })?;
-            let iterator_span_name = format!("gluesql.{}.{}_rows", args.name, method_name);
+            let iterator_operation = match method_name.as_str() {
+                "scan_data" => "scan_rows".to_owned(),
+                "scan_indexed_data" => "scan_indexed_rows".to_owned(),
+                _ => format!("{method_name}_rows"),
+            };
+            let iterator_span_name = format!("gluesql.{}.{iterator_operation}", args.name);
             let block = &method.block;
             method.block = syn::parse_quote!({
                 let __gluesql_result = (|| #block)();
