@@ -64,6 +64,7 @@ fn init_tracing() -> Result<(), Box<dyn Error>> {
         )
         .with_span_events(FmtSpan::CLOSE)
         .with_writer(io::stderr)
+        .finish()
         .try_init()?;
 
     Ok(())
