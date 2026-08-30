@@ -193,7 +193,7 @@ For wrapper or composite storages, `storage.type` identifies the outer type pass
 an internal dispatch span only when the selected inner backend must also be visible.
 
 Calls made directly to a storage trait method outside the GlueSQL planner and executor do not pass
-through these Core boundaries. Use `instrument_storage` when the storage also needs those direct
+through these Core boundaries. Use `trace_storage` when the storage also needs those direct
 calls, method arguments, errors, or lazy iterator consumption to be observable.
 
 Add the optional macro and tracing dependencies to the storage crate:
@@ -210,26 +210,19 @@ tracing = { version = "0.1", optional = true }
 Apply the attribute to each implemented trait without changing the method bodies or call sites:
 
 ```rust
-#[cfg_attr(
-    feature = "tracing",
-    gluesql_macros::instrument_storage(
-        name = "my_storage",
-        capture = "full",
-        iterator = "full"
-    )
-)]
+#[cfg_attr(feature = "tracing", gluesql_macros::trace_storage(name = "my_storage"))]
 impl Store for MyStorage {
     // Existing implementation
 }
 ```
 
-`capture = "full"` records every simple named argument with its `Debug` representation, records
-`row_count` for arguments named `rows` or `keys`, and records `Result` errors. Use
-`capture = "off"` to keep only timing. The generated span name follows
+The default `capture = "full"` records every simple named argument with its `Debug`
+representation, records `row_count` for arguments named `rows` or `keys`, and records `Result`
+errors. Use `capture = "off"` to keep only timing. The generated span name follows
 `gluesql.<storage>.<method>`.
 
-With `iterator = "full"`, `scan_data` and `scan_indexed_data` results are wrapped automatically.
-The wrapper emits each yielded row or error as an event and records `row_count`, `error_count`, and
+The default `iterator = "full"` wraps `scan_data` and `scan_indexed_data` results automatically. The
+wrapper emits each yielded row or error as an event and records `row_count`, `error_count`, and
 `completed` when dropped. For an iterator-returning method on any other trait, mark it inside the
 attributed implementation:
 
@@ -444,7 +437,7 @@ Use the storage type to decide how `gluesql.database.size_bytes` is populated:
 | Remote service | Leave the local field empty; report a server-side metric separately if available |
 
 The generic `gluesql.storage.*` spans are available through `gluesql-core/tracing` without adding
-backend-specific instrumentation. Apply `instrument_storage` as described above when direct
+backend-specific instrumentation. Apply `trace_storage` as described above when direct
 storage calls or storage-specific arguments must be visible. With `iterator = "full"`, the macro
 uses one span for lazy iterator consumption, records its final row count, and emits row events
 rather than creating a span for every row.
@@ -628,9 +621,9 @@ profiler. Use `perf` or `cargo-flamegraph` when function-level CPU samples are r
 Full tracing deliberately records query and storage values that may contain sensitive data:
 
 - `gluesql.execute` and `gluesql.plan_sql` record SQL source text and bound parameters.
-- `instrument_storage(capture = "full")` records simple named method arguments, including keys,
+- `trace_storage(capture = "full")` records simple named method arguments, including keys,
   schemas, and rows, together with `Result` errors.
-- `instrument_storage(iterator = "full")` emits an event for every yielded row or error.
+- `trace_storage(iterator = "full")` emits an event for every yielded row or error.
 
 Enable tracing only in environments where this data is acceptable. Use `capture = "off"` when a
 storage needs timing without argument and error values, and use an appropriate `RUST_LOG` filter

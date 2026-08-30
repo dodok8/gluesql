@@ -1,4 +1,4 @@
-use gluesql_macros::instrument_storage;
+use gluesql_macros::trace_storage;
 
 type Result<T> = std::result::Result<T, &'static str>;
 type Rows = Box<dyn Iterator<Item = Result<i32>>>;
@@ -10,7 +10,7 @@ trait ExternalStore {
 
 struct Storage;
 
-#[instrument_storage(name = "external", capture = "full", iterator = "full")]
+#[trace_storage(name = "external")]
 impl ExternalStore for Storage {
     fn lookup(&self, key: i32, rows: Vec<i32>) -> Result<Vec<i32>> {
         Ok(rows.into_iter().filter(|value| *value == key).collect())

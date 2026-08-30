@@ -70,7 +70,7 @@ pub fn derive_to_glue_row(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn instrument_storage(attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn trace_storage(attr: TokenStream, item: TokenStream) -> TokenStream {
     instrument_storage::expand(attr.into(), item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
