@@ -221,10 +221,10 @@ representation, records `row_count` for arguments named `rows` or `keys`, and re
 errors. Use `capture = "off"` to keep only timing. The generated span name follows
 `gluesql.<storage>.<method>`.
 
-The default `iterator = "full"` wraps `scan_data` and `scan_indexed_data` results automatically. The
-wrapper emits each yielded row or error as an event and records `row_count`, `error_count`, and
-`completed` when dropped. For an iterator-returning method on any other trait, mark it inside the
-attributed implementation:
+`scan_data` and `scan_indexed_data` results are wrapped automatically. The wrapper emits each
+yielded row or error as an event and records `row_count`, `error_count`, and `completed` when
+dropped. For an iterator-returning method on any other trait, mark it inside the attributed
+implementation:
 
 ```rust
 #[trace_iterator]
@@ -437,10 +437,10 @@ Use the storage type to decide how `gluesql.database.size_bytes` is populated:
 | Remote service | Leave the local field empty; report a server-side metric separately if available |
 
 The generic `gluesql.storage.*` spans are available through `gluesql-core/tracing` without adding
-backend-specific instrumentation. Apply `trace_storage` as described above when direct
-storage calls or storage-specific arguments must be visible. With `iterator = "full"`, the macro
-uses one span for lazy iterator consumption, records its final row count, and emits row events
-rather than creating a span for every row.
+backend-specific instrumentation. Apply `trace_storage` as described above when direct storage
+calls or storage-specific arguments must be visible. The macro uses one span for lazy iterator
+consumption, records its final row count, and emits row events rather than creating a span for
+every row.
 
 Firefox Profiler support is optional. To include it, copy the `firefox_profile.rs` support module
 without changing its marker and counter names, retain `GLUESQL_FIREFOX_PROFILE_PATH` as the output
@@ -623,7 +623,7 @@ Full tracing deliberately records query and storage values that may contain sens
 - `gluesql.execute` and `gluesql.plan_sql` record SQL source text and bound parameters.
 - `trace_storage(capture = "full")` records simple named method arguments, including keys,
   schemas, and rows, together with `Result` errors.
-- `trace_storage(iterator = "full")` emits an event for every yielded row or error.
+- `trace_storage` emits an event for every yielded row or error from traced iterators.
 
 Enable tracing only in environments where this data is acceptable. Use `capture = "off"` when a
 storage needs timing without argument and error values, and use an appropriate `RUST_LOG` filter

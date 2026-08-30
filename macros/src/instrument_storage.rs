@@ -11,7 +11,6 @@ use {
 struct Args {
     name: String,
     capture_full: bool,
-    trace_iterators: bool,
 }
 
 impl Args {
@@ -19,7 +18,6 @@ impl Args {
         let values = Punctuated::<MetaNameValue, Token![,]>::parse_terminated.parse2(tokens)?;
         let mut name = None;
         let mut capture_full = true;
-        let mut trace_iterators = true;
 
         for MetaNameValue { path, value, .. } in values {
             let Expr::Lit(ExprLit {
@@ -34,8 +32,6 @@ impl Args {
                 name = Some(value.value());
             } else if path.is_ident("capture") {
                 capture_full = parse_mode(&value, "capture")?;
-            } else if path.is_ident("iterator") {
-                trace_iterators = parse_mode(&value, "iterator")?;
             } else {
                 return Err(syn::Error::new_spanned(path, "unsupported option"));
             }
@@ -46,7 +42,6 @@ impl Args {
                 syn::Error::new(proc_macro2::Span::call_site(), "missing `name = \"...\"`")
             })?,
             capture_full,
-            trace_iterators,
         })
     }
 }
@@ -93,45 +88,19 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
             }
         }
 
-        let records_error = args.capture_full && result_ok_type(&method.sig.output).is_some();
-        let attribute = match (fields.is_empty(), records_error) {
-            (true, true) => quote!(
-                #[tracing::instrument(
-                    target = "gluesql",
-                    name = #span_name,
-                    level = "trace",
-                    skip_all,
-                    err(Debug)
-                )]
-            ),
-            (true, false) => quote!(
-                #[tracing::instrument(
-                    target = "gluesql",
-                    name = #span_name,
-                    level = "trace",
-                    skip_all
-                )]
-            ),
-            (false, true) => quote!(
-                #[tracing::instrument(
-                    target = "gluesql",
-                    name = #span_name,
-                    level = "trace",
-                    skip_all,
-                    fields(#(#fields),*),
-                    err(Debug)
-                )]
-            ),
-            (false, false) => quote!(
-                #[tracing::instrument(
-                    target = "gluesql",
-                    name = #span_name,
-                    level = "trace",
-                    skip_all,
-                    fields(#(#fields),*)
-                )]
-            ),
-        };
+        let fields = (!fields.is_empty()).then(|| quote!(fields(#(#fields),*),));
+        let error = (args.capture_full && result_ok_type(&method.sig.output).is_some())
+            .then(|| quote!(err(Debug),));
+        let attribute = quote!(
+            #[tracing::instrument(
+                target = "gluesql",
+                name = #span_name,
+                level = "trace",
+                skip_all,
+                #fields
+                #error
+            )]
+        );
         let mut attribute = syn::Attribute::parse_outer.parse2(attribute)?;
         method.attrs.append(&mut attribute);
 
@@ -142,9 +111,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> Result<TokenStream, syn::
         method
             .attrs
             .retain(|attribute| !attribute.path().is_ident("trace_iterator"));
-        let should_trace_iterator = args.trace_iterators
-            && (explicitly_traced
-                || matches!(method_name.as_str(), "scan_data" | "scan_indexed_data"));
+        let should_trace_iterator =
+            explicitly_traced || matches!(method_name.as_str(), "scan_data" | "scan_indexed_data");
 
         if should_trace_iterator {
             let ok_type = result_ok_type(&method.sig.output).ok_or_else(|| {
