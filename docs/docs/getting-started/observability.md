@@ -33,7 +33,7 @@ The levels have the following intended scope:
 
 | Level | Data |
 | --- | --- |
-| `info` | Total query execution time |
+| `info` | Total query execution time, SQL source text, and bound parameters |
 | `debug` | Parse, translate, plan, statement execution, and selected access path |
 | `trace` | Transaction, primary storage, and enabled backend call boundaries |
 
