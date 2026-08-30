@@ -146,6 +146,8 @@ gluesql.execute
 ├── gluesql.parse
 ├── gluesql.translate
 ├── gluesql.plan
+│   └── gluesql.storage.plan
+│       └── gluesql.storage.fetch_schema
 └── gluesql.execute_statement
     ├── gluesql.storage.begin
     │   └── gluesql.redb.begin
@@ -187,6 +189,26 @@ cover every storage trait method used by the planner and executor:
 Each name is prefixed with `gluesql.storage.`. Data mutation spans also record `row_count`, and
 `gluesql.storage.begin` records `autocommit`.
 
+### Adding tracing support to a storage
+
+A storage implementation does not need a derive macro, wrapper type, or tracing code to receive
+the generic spans above. Implement the relevant GlueSQL storage traits as usual. When a query runs
+through `Glue` with `gluesql-core/tracing` enabled, Core records the trait-call boundary and the
+concrete Rust type in `storage.type`.
+
+For wrapper or composite storages, `storage.type` identifies the outer type passed to `Glue`. Add
+an internal dispatch span only when the selected inner backend must also be visible.
+
+Calls made directly to a storage trait method outside the GlueSQL planner and executor do not pass
+through these Core boundaries. Add an optional `tracing` feature to the storage crate only when it
+needs spans for those direct calls or for backend-specific work below the trait boundary. Storage
+crates should not install a subscriber; the CLI or host application owns subscriber configuration.
+
+Use backend-specific spans only when they add information that the generic boundary cannot expose.
+For example, a storage can instrument iterator consumption, serialization, network requests, or
+transaction flushes. Use the `gluesql.<storage>.<operation>` naming pattern and avoid recording SQL
+text, keys, row values, or one span per row.
+
 Access-path events use one of these stable values:
 
 ```text
@@ -196,7 +218,8 @@ full_scan
 ```
 
 `scan_data` and `scan_indexed_data` return lazy iterators. Their generic storage spans measure
-iterator creation; `gluesql.execute_statement` includes subsequent iterator consumption.
+iterator creation, not the complete scan; `gluesql.execute_statement` includes subsequent iterator
+consumption.
 RedbStorage additionally emits `gluesql.redb.scan_rows` from the first iterator read until the
 iterator is dropped. Its busy duration measures Redb row reads and deserialization, its idle
 duration covers time spent by the consumer between reads, and its `row_count` field records the
