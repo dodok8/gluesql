@@ -111,7 +111,10 @@ pub enum PayloadVariable {
         target = "gluesql",
         level = "trace",
         skip_all,
-        fields(autocommit = autocommit)
+        fields(
+            autocommit = autocommit,
+            storage.type = std::any::type_name::<T>()
+        )
     )
 )]
 fn begin_transaction<T: Transaction>(storage: &mut T, autocommit: bool) -> Result<bool> {
@@ -124,7 +127,8 @@ fn begin_transaction<T: Transaction>(storage: &mut T, autocommit: bool) -> Resul
         name = "gluesql.storage.commit",
         target = "gluesql",
         level = "trace",
-        skip_all
+        skip_all,
+        fields(storage.type = std::any::type_name::<T>())
     )
 )]
 fn commit_transaction<T: Transaction>(storage: &mut T) -> Result<()> {
@@ -137,7 +141,8 @@ fn commit_transaction<T: Transaction>(storage: &mut T) -> Result<()> {
         name = "gluesql.storage.rollback",
         target = "gluesql",
         level = "trace",
-        skip_all
+        skip_all,
+        fields(storage.type = std::any::type_name::<T>())
     )
 )]
 fn rollback_transaction<T: Transaction>(storage: &mut T) -> Result<()> {

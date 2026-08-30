@@ -165,6 +165,11 @@ The `gluesql.redb.*` spans are emitted when RedbStorage and its `tracing` featur
 top-level `gluesql` and CLI `tracing` features enable Redb instrumentation when they include
 RedbStorage.
 
+Every generic `gluesql.storage.*` span records `storage.type` using the concrete Rust storage type.
+New storage implementations therefore receive identifiable trait-boundary spans through
+`gluesql-core/tracing` without adding storage-specific instrumentation. Storage-specific spans are
+only needed for internal operations that are not visible at the trait boundary.
+
 Access-path events use one of these stable values:
 
 ```text

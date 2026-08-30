@@ -31,7 +31,8 @@ fn trace_access_path(access_path: &'static str) {
         name = "gluesql.storage.scan_data",
         target = "gluesql",
         level = "trace",
-        skip_all
+        skip_all,
+        fields(storage.type = std::any::type_name::<T>())
     )
 )]
 pub(crate) fn trace_scan<'a, T: GStore>(storage: &'a T, table_name: &str) -> Result<RowIter<'a>> {
@@ -46,7 +47,8 @@ pub(crate) fn trace_scan<'a, T: GStore>(storage: &'a T, table_name: &str) -> Res
         name = "gluesql.storage.scan_indexed_data",
         target = "gluesql",
         level = "trace",
-        skip_all
+        skip_all,
+        fields(storage.type = std::any::type_name::<T>())
     )
 )]
 pub(crate) fn trace_index_scan<'a, T: GStore>(
@@ -67,7 +69,8 @@ pub(crate) fn trace_index_scan<'a, T: GStore>(
         name = "gluesql.storage.fetch_data",
         target = "gluesql",
         level = "trace",
-        skip_all
+        skip_all,
+        fields(storage.type = std::any::type_name::<T>())
     )
 )]
 pub(crate) fn trace_fetch<T: GStore>(
