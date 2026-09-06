@@ -144,11 +144,10 @@ not replace it.
 The initial instrumentation follows the query execution pipeline:
 
 ```text
-gluesql.execute { sql, params }
-├── gluesql.plan_sql { sql, params }
+gluesql.execute { sql }
+├── gluesql.plan { sql, params }
 │   ├── gluesql.parse
-│   ├── gluesql.translate
-│   └── gluesql.plan
+│   └── gluesql.translate
 └── gluesql.execute_statement
     ├── gluesql.redb.begin
     ├── gluesql.redb.fetch_data
@@ -885,7 +884,7 @@ profiler. Use `perf` or `cargo-flamegraph` when function-level CPU samples are r
 
 Full tracing deliberately records query and storage values that may contain sensitive data:
 
-- `gluesql.execute` and `gluesql.plan_sql` record SQL source text and bound parameters.
+- `gluesql.execute` records SQL source text, and `gluesql.plan` records the SQL and bound parameters.
 - `trace_storage(capture = "full")` records simple named method arguments, including keys,
   schemas, and rows, together with `Result` errors.
 - `trace_storage` emits an event for every yielded row or error from traced iterators.
