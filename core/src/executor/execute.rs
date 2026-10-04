@@ -12,7 +12,7 @@ use {
         validate::{ColumnValidation, validate_unique},
     },
     crate::{
-        ast::{BinaryOperator, DataType, Dictionary, Literal, Variable},
+        ast::{BinaryOperator, DataType, Dictionary, ForeignKey, Literal, Variable},
         data::{Key, Row, SCHEMALESS_DOC_COLUMN, Schema, Value},
         plan::{
             DictionarySourcePlan, ExprPlan, FilterInputPlan, FilterPlan, ProjectInputPlan,
@@ -132,16 +132,6 @@ pub fn execute<T: GStore + GStoreMut>(
     }
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    gluesql_macros::observe(
-        name = "gluesql.mutation.collect",
-        fields(operation = "update"),
-        start = before_let(rows, occurrence = 1),
-        end = after_let(rows, occurrence = 1),
-        record(buffered_rows = rows.len())
-    )
-)]
 fn execute_inner<T: GStore + GStoreMut>(
     storage: &mut T,
     statement: &StatementPlan,
@@ -224,14 +214,14 @@ fn execute_inner<T: GStore + GStoreMut>(
 
             let foreign_keys = Rc::new(foreign_keys);
 
-            let rows = fetch(storage, table_name, all_columns, selection.as_ref())?
-                .map(|item| {
-                    let (key, row) = item?;
-                    let row = update.apply(row, foreign_keys.as_ref())?;
-
-                    Ok((key, row))
-                })
-                .collect::<Result<Vec<(Key, Row)>>>()?;
+            let rows = collect_update_rows(
+                storage,
+                table_name,
+                all_columns,
+                selection.as_ref(),
+                &update,
+                foreign_keys.as_ref(),
+            )?;
 
             if let Some(column_defs) = column_defs {
                 let column_validation =
@@ -357,4 +347,26 @@ fn execute_inner<T: GStore + GStoreMut>(
             delete_function(storage, names, *if_exists).map(|()| Payload::DropFunction)
         }
     }
+}
+
+#[cfg_attr(
+    feature = "tracing",
+    gluesql_macros::observe(fields(operation = "update"))
+)]
+fn collect_update_rows<T: GStore>(
+    storage: &T,
+    table_name: &str,
+    columns: Rc<[String]>,
+    selection: Option<&ExprPlan>,
+    update: &Update<'_, T>,
+    foreign_keys: &[ForeignKey],
+) -> Result<Vec<(Key, Row)>> {
+    fetch(storage, table_name, columns, selection)?
+        .map(|item| {
+            let (key, row) = item?;
+            let row = update.apply(row, foreign_keys)?;
+
+            Ok((key, row))
+        })
+        .collect()
 }
