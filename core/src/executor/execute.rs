@@ -349,10 +349,7 @@ fn execute_inner<T: GStore + GStoreMut>(
     }
 }
 
-#[cfg_attr(
-    feature = "tracing",
-    gluesql_macros::observe(fields(operation = "update"))
-)]
+#[cfg_attr(feature = "tracing", gluesql_macros::observe)]
 fn collect_update_rows<T: GStore>(
     storage: &T,
     table_name: &str,
